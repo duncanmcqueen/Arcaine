@@ -9,6 +9,7 @@
 #include "../../runtime/quantization/nvfp4.hpp"
 #include "runtime/kernels/embedding.hpp"
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
@@ -287,11 +288,14 @@ void DiffusionGemmaModel::decode_forward(
         if (score_target) {
             diff_layer_forward(ctx0, w_.layers[l], hidden.data(), enc_kv_.layer(l),
                                seq, enc_len, cfg_.text, /*is_encoder=*/false);
-            // Fault-injection point inside decode: fail after the first layer
-            // while hidden and the layer intermediates are still live.
-            if (l == 0 && structured_fault("in_decode_layer"))
-                throw std::runtime_error(
-                    "read_decisions: injected fault inside decode (test hook)");
+            // Fault-injection point inside decode: fail once after the first
+            // layer while hidden and the layer intermediates are still live.
+            if (l == 0 && structured_fault("in_decode_layer")) {
+                static std::atomic<bool> fired{false};
+                if (!fired.exchange(true))
+                    throw std::runtime_error(
+                        "read_decisions: injected fault inside decode (test hook)");
+            }
             continue;
         }
         Nvfp4GraphSession session;
