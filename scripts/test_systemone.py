@@ -214,6 +214,18 @@ def main():
                      "questions": {"big": {"type": "choice", "criteria": crit}}}, key)
     check("choice 256 options -> 422", st == 422, f"got {st}")
 
+    # Explicit intermediate Choice sizes.
+    for n in (26, 27, 128):
+        crit = {f"opt{i:03d}": f"Option {i}" for i in range(n)}
+        st, _, b = post(base, "/v1/systemone",
+                        {"model": model, "state": "Pick an option.",
+                         "questions": {"q": {"type": "choice",
+                                             "instructions": "Which option?",
+                                             "criteria": crit}}}, key)
+        got = b.get("answers", {}).get("q", {}).get("probabilities", {}) if b else {}
+        check(f"choice {n} options -> 200 with {n} probabilities",
+              st == 200 and len(got) == n, f"got {st}: {str(b)[:250]}")
+
     st, _, b = post(base, "/v1/systemone",
                     {"model": model, "state": "Rate it.",
                      "questions": {"s": {"type": "score", "instructions": "Rate.",
@@ -238,9 +250,12 @@ def main():
     # --- diagnostics extension --------------------------------------------------
     st, _, b = post(base, "/v1/systemone", dict(GOLDEN, arcaine={"diagnostics": True}), key)
     d = (b.get("arcaine") or {}).get("diagnostics", {})
+    # reads depends on the server policy (ARCAINE_SYSTEMONE_READS*). Accept any
+    # positive count and require the read-noise fields to be null only at N=1.
     ok = (st == 200 and set(d) == set(GOLDEN["questions"])
-          and all("label_mass" in v and "vocab_entropy" in v and v.get("reads") == 1
-                  and v.get("selected_label_stderr") is None for v in d.values()))
+          and all("label_mass" in v and "vocab_entropy" in v and v.get("reads", 0) >= 1
+                  and ((v.get("selected_label_stderr") is None) == (v.get("reads") == 1))
+                  for v in d.values()))
     check("diagnostics extension", ok, f"got {st}: {str(b)[:400]}")
     if ok:
         print("  diagnostics:", json.dumps(d, indent=1)[:800])
@@ -278,6 +293,20 @@ def main():
                   for (st, _, body) in results)
     check("concurrent callers: all 200 and match isolated answers", ok_conc,
           str([(st, (body or {}).get("error")) for (st, _, body) in results]))
+
+    # --- mixed chat + structured concurrency ----------------------------------
+    def mixed(kind):
+        if kind == "chat":
+            return post(base, "/v1/chat/completions",
+                        {"model": model,
+                         "messages": [{"role": "user", "content": "Say hello in one word."}],
+                         "max_tokens": 16}, key)
+        return post(base, "/v1/systemone", GOLDEN, key)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ex:
+        mixed_results = list(ex.map(mixed, ["structured", "chat"] * 3))
+    check("mixed chat/structured concurrency: all 200",
+          all(st == 200 for (st, _, _) in mixed_results),
+          str([(st, (body or {}).get("error")) for (st, _, body) in mixed_results]))
 
     # --- ordinary chat unaffected ------------------------------------------------
     st, _, b = post(base, "/v1/chat/completions",

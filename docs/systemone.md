@@ -27,7 +27,8 @@ predictions, calibrated probabilities, or equal performance.
   injection + error-path drain + graph-bypass counters), and
   `scripts/check_sdk_compat.py` (official TypeSafe/Jev SDK parses live
   responses, including structured Choice/Score content, arbitrary IDs, and all
-  255 options). See the final report for exact results on the named checkpoint.
+  255 options). See [systemone-results.md](systemone-results.md) for the result
+  table, environment, and incomplete gates.
 - **Not established:** exact Jev confidence parity (formula unpublished),
   calibrated probabilities, equal predictions/throughput, and
   quality/accuracy/Brier numbers. Local accuracy and Brier evaluation need

@@ -56,7 +56,14 @@ def main():
     ap.add_argument("--key", default="local")
     args = ap.parse_args()
 
-    import typesafe_sdk  # noqa: F401  (surface an early, clear import error)
+    try:
+        import typesafe_sdk  # noqa: F401
+    except ImportError:
+        print("[INCOMPLETE] the official 'typesafe_sdk' package is not installed; "
+              "response parsing cannot be checked. This is not a passing result. "
+              "This script also covers response parsing only, not official request "
+              "serialization; see docs/systemone-results.md.")
+        raise SystemExit(2)
 
     st, raw = post(args.base, "/v1/models", None, args.key)
     model = json.loads(raw)["data"][0]["id"]

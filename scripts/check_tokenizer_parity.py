@@ -63,10 +63,17 @@ def main():
                     help="runs the native checker and reads a JSON array from stdin")
     args = ap.parse_args()
 
-    from tokenizers import Tokenizer
+    try:
+        from tokenizers import Tokenizer
+    except ImportError:
+        print("[INCOMPLETE] Python 'tokenizers' is not installed; the checkpoint "
+              "comparison cannot run. This is not a passing release-gate result.")
+        sys.exit(2)
     ref = Tokenizer.from_file(args.model.rstrip("/") + "/tokenizer.json")
 
     failures = 0
+    prompt_checked = False
+    skipped = 0
 
     # 1. Rendered chat prompt (the real encoder input).
     try:
@@ -81,13 +88,16 @@ def main():
                                      enable_thinking=False)
         hf_ids = list(enc["input_ids"])
         nat_ids = native_encode(args.native_cmd, [rendered])[0]
+        prompt_checked = True
         if hf_ids == nat_ids:
             print(f"[PASS] rendered chat prompt ({len(hf_ids)} ids)")
         else:
             failures += 1
             print(f"[FAIL] rendered chat prompt\n   HF:     {hf_ids}\n   native: {nat_ids}")
     except ImportError:
-        print("[SKIP] rendered prompt: transformers not installed")
+        skipped += 1
+        print("[INCOMPLETE] rendered prompt: transformers not installed. The prompt "
+              "check is required; this run does not establish prompt parity.")
 
     # 2. Slot-critical fixtures as the compiler encodes them: a continuation
     #    immediately after the prompt's closing special token.
@@ -113,7 +123,14 @@ def main():
     if failures:
         print(f"{failures} tokenizer parity FAILURES (slot/prompt critical)")
         sys.exit(1)
+    if skipped:
+        print(f"INCOMPLETE: {skipped} required check(s) skipped; "
+              "this is not a passing release-gate result")
+        sys.exit(2)
     print(f"tokenizer parity: rendered prompt + {len(SLOT_FIXTURES)} slot-critical fixtures match")
+    print("NOTE: this compares raw encodings, not the full compiled artifact set "
+          "(build_prompt ids, canvas, slot, label codebook) against the checkpoint "
+          "tokenizer; see docs/systemone-results.md.")
 
 
 if __name__ == "__main__":
