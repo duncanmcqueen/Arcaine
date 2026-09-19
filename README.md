@@ -148,8 +148,9 @@ ARCAINE_API_KEY=local ./build/arcaine_server \
   --host 0.0.0.0 --port 7461
 ```
 
-Open `http://<server-lan-ip>:7461/` from another device and enter `local` in
-the API-key field when authentication is enabled. If the process is started
+Open `http://<server-lan-ip>:7461/` from another device. With the sample
+command above, enter `local` in the API-key field. This value matches
+`ARCAINE_API_KEY=local`. If the process is started
 outside the repository, set `ARCAINE_WEB_DIR=/path/to/Arcaine/third_party/web`.
 The API and UI share the same origin, so no CORS configuration is required.
 
