@@ -20,6 +20,10 @@ public:
     // tokens that differ from build_prompt() are the assistant generation
     // suffix, isolated from the state and instructions content.
     std::vector<int> build_prompt_no_generation(const std::vector<ChatTemplateMessage>& messages);
+    // Render only (no tokenizing). Use this with encode_raw to avoid tokenizing
+    // a long shared prefix twice.
+    std::string build_prompt_text(const std::vector<ChatTemplateMessage>& messages,
+                                  bool add_generation_prompt);
     std::vector<int> build_prompt_json(
         const nlohmann::ordered_json& messages,
         const nlohmann::ordered_json& tools,

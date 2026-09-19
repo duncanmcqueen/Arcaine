@@ -565,12 +565,31 @@ void compile_decision_questions(DecisionRequest& req, TokenizerBridge& tokenizer
         const std::vector<ChatTemplateMessage> messages = {
             {"system", system_text(q)},
             {"user", req.state_text}};
-        q.prompt_ids = tokenizer.build_prompt(messages);
+        // Render twice (cheap) but tokenize the long shared prefix only once.
+        // The generation prompt is appended, so it is a string suffix; tokenize
+        // that short suffix separately.
+        const std::string full_text = tokenizer.build_prompt_text(messages, true);
+        const std::string no_gen_text = tokenizer.build_prompt_text(messages, false);
+        q.prompt_ids = tokenizer.encode_raw(full_text, /*add_bos=*/false);
         q.prompt_tokens = (int)q.prompt_ids.size();
         if (q.prompt_ids.empty())
             throw DecisionSchemaError(what + ": chat template produced an empty prompt");
-        const std::vector<int> no_gen = tokenizer.build_prompt_no_generation(messages);
-        std::vector<int32_t> gen_suffix = generation_suffix(q.prompt_ids, no_gen, what);
+        std::vector<int32_t> gen_suffix;
+        if (full_text.size() >= no_gen_text.size() &&
+            full_text.compare(0, no_gen_text.size(), no_gen_text) == 0) {
+            gen_suffix = tokenizer.encode_raw(full_text.substr(no_gen_text.size()),
+                                              /*add_bos=*/false,
+                                              /*add_prefix_space=*/false);
+            if (gen_suffix.size() > q.prompt_ids.size() ||
+                !std::equal(gen_suffix.rbegin(), gen_suffix.rend(), q.prompt_ids.rbegin()))
+                throw DecisionSchemaError(what + ": the generation suffix is not a token "
+                    "suffix of the rendered prompt");
+        } else {
+            // The template did not append the generation prompt as a string
+            // suffix. Tokenize the no-generation render to locate it.
+            const std::vector<int> no_gen = tokenizer.build_prompt_no_generation(messages);
+            gen_suffix = generation_suffix(q.prompt_ids, no_gen, what);
+        }
         std::vector<int32_t> prefix = detect_scaffold_prefix(tokenizer, gen_suffix, what);
 
         // Verify labels with the prompt prefix and close token.

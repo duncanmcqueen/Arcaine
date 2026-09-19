@@ -23,6 +23,12 @@ std::vector<int> TokenizerBridge::build_prompt_no_generation(
     return std::move(built.tokens);
 }
 
+std::string TokenizerBridge::build_prompt_text(
+        const std::vector<ChatTemplateMessage>& messages, bool add_generation_prompt) {
+    return build_chat_prompt_text(model_dir_, messages, add_generation_prompt,
+                                  /*enable_thinking=*/false);
+}
+
 std::vector<int> TokenizerBridge::build_prompt_json(
         const nlohmann::ordered_json& messages,
         const nlohmann::ordered_json& tools,

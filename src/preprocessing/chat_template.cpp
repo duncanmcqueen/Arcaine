@@ -207,6 +207,32 @@ PromptBuildResult build_chat_prompt(
                               {}, {}, add_generation_prompt, enable_thinking);
 }
 
+std::string build_chat_prompt_text(
+    const std::string& model_dir,
+    const std::vector<ChatTemplateMessage>& messages,
+    bool add_generation_prompt,
+    bool enable_thinking
+) {
+    if (messages.empty())
+        throw std::runtime_error("chat prompt needs at least one message");
+    json rendered_messages = json::array();
+    for (const ChatTemplateMessage& message : messages) {
+        if (message.role.empty())
+            throw std::runtime_error("chat message role cannot be empty");
+        rendered_messages.push_back({{"role", message.role},
+                                     {"content", message.content}});
+    }
+    const TokenizerMetadata meta = load_tokenizer_metadata(model_dir);
+    const std::string source = read_file(model_dir + "/chat_template.jinja");
+    minja::chat_template tmpl(source, meta.bos_token, meta.eos_token);
+    minja::chat_template_inputs inputs;
+    inputs.messages = std::move(rendered_messages);
+    inputs.tools = json::array();
+    inputs.add_generation_prompt = add_generation_prompt;
+    inputs.extra_context = {{"enable_thinking", enable_thinking}};
+    return tmpl.apply(inputs);
+}
+
 PromptBuildResult build_chat_prompt_json(
     const std::string& model_dir,
     json messages,
