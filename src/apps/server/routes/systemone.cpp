@@ -87,7 +87,7 @@ struct SystemoneConfig {
     int   auto_max = 4;
     float auto_threshold = 0.5f;
     float auto_min_label_mass = 0.0f;
-    float watchdog_s = 0.0f;   // 0 = off
+    float watchdog_s = 0.0f;   // 0 turns the watchdog off
 };
 
 SystemoneConfig load_systemone_config() {

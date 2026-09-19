@@ -159,9 +159,10 @@ the response's `model` always reports the actual local model.
   mass is below `ARCAINE_SYSTEMONE_AUTO_MIN_LABEL_MASS` (default 0.0), or the
   global argmax is not an allowed label. The first read is always included.
 - `ARCAINE_GPU_WATCHDOG_S=N` (default 0 = off, range 0–3600): if a structured
-  read makes no GPU progress for N seconds, the server logs the stalled stage
-  and exits with code 70 so the model lock is released. A hung GPU can need a
-  host reboot; the watchdog only prevents a silent, permanent hang.
+  read makes no GPU progress for N seconds, the server writes the stalled stage
+  to the log. Then the server stops with code 70. In this way, the model lock is
+  released. A hung GPU can need a host reboot. The watchdog prevents only a
+  silent, permanent hang.
 
 ## Implementation notes
 

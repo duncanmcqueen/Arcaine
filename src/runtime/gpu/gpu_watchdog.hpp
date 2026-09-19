@@ -1,14 +1,14 @@
 #pragma once
 // GPU work watchdog.
 //
-// A hung GPU kernel blocks the worker thread inside the driver. The thread
-// cannot check a deadline and cannot release the model lock. This watchdog
-// runs on its own thread, watches a progress heartbeat, and exits the process
-// with a clear message when the heartbeat stops. A fast, visible exit is
-// better than a server that accepts requests and never answers.
+// A hung GPU kernel blocks the worker thread in the driver. The thread cannot
+// check a deadline. The thread cannot release the model lock. This watchdog
+// runs on a separate thread. It watches a progress heartbeat. If the heartbeat
+// stops, the watchdog stops the process and writes a message. A fast, visible
+// exit is better than a server that accepts requests and never answers.
 //
-// A timeout of 0 disables the watchdog. Each heartbeat also records the
-// current stage, so the log names the operation that stopped making progress.
+// A timeout of 0 turns the watchdog off. Each heartbeat records the current
+// stage. In this way, the log names the operation that stopped.
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -33,7 +33,7 @@ public:
     GpuWatchdog(const GpuWatchdog&) = delete;
     GpuWatchdog& operator=(const GpuWatchdog&) = delete;
 
-    // Record progress. Call before and after every long GPU operation.
+    // Record progress. Call this function before and after a long GPU operation.
     void beat(const char* stage) {
         if (!(timeout_s_ > 0.0)) return;
         stage_.store(stage, std::memory_order_relaxed);
@@ -62,9 +62,10 @@ private:
             if (age >= timeout_s_) {
                 const char* stage = stage_.load(std::memory_order_relaxed);
                 std::fprintf(stderr,
-                             "[watchdog] '%s' made no GPU progress for %.1fs at stage "
-                             "'%s'; exiting to release the model lock. The GPU may be "
-                             "hung and can need a host reboot.\n",
+                             "[watchdog] '%s' has no GPU progress for %.1fs at stage "
+                             "'%s'. The watchdog stops the process. The model lock is "
+                             "released. The GPU can be hung. A host reboot can be "
+                             "necessary.\n",
                              name_.c_str(), age, stage ? stage : "?");
                 std::fflush(stderr);
                 std::_Exit(70);

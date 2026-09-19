@@ -85,8 +85,8 @@ DecisionReadResult DiffusionGemmaModel::read_decisions(
     // Disable graph capture for this read.
     Nvfp4EagerScope eager_scope;
 
-    // Bound the time this read may hold the model lock. If the GPU stops
-    // making progress, the watchdog exits the process with a clear message.
+    // Limit the time this read can hold the model lock. If the GPU stops, the
+    // watchdog stops the process and writes a message.
     GpuWatchdog watchdog("systemone-read", options.watchdog_s);
     watchdog.beat("validation");
 

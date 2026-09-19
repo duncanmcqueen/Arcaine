@@ -1,8 +1,9 @@
-// gpu_watchdog_check — verifies the GPU-work watchdog behavior in a separate
-// process.  Checks that a disabled watchdog and a healthy heartbeat do not
-// exit, and that a stalled heartbeat exits the process with code 70.
+// gpu_watchdog_check — checks the GPU work watchdog in a separate process.
+// It shows that a disabled watchdog and a healthy heartbeat do not stop the
+// process. It also shows that a stalled heartbeat stops the process with code
+// 70.
 //
-// Build & run (inside the arcaine-dev-1 container):
+// Build and run the test in the arcaine-dev-1 container:
 //   docker exec arcaine-dev-1 sh -c 'cd /workspace && icpx -O2 -pthread \
 //     src/modeling/diffusion_gemma/benchmarks/gpu_watchdog_check.cpp \
 //     -o /tmp/gpu_watchdog_check && /tmp/gpu_watchdog_check'
