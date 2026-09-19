@@ -161,7 +161,8 @@ add_executable(arcaine_server
     src/apps/server/openai/response_encoder.cpp
     src/apps/server/openai/sse_event_sink.cpp
     src/apps/server/routes/chat_completions.cpp
-    src/apps/server/routes/models.cpp)
+    src/apps/server/routes/models.cpp
+    src/apps/server/routes/systemone.cpp)
 target_compile_options(arcaine_server PRIVATE ${ARCAINE_SYCL_LIB_FLAGS})
 target_link_options(arcaine_server PRIVATE ${ARCAINE_SYCL_LINK_FLAGS})
 target_link_libraries(arcaine_server PRIVATE

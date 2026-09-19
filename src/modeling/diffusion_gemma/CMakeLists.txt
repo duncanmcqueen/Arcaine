@@ -11,11 +11,13 @@ add_library(arcaine_model_diffusion_gemma STATIC
     attention.cpp
     generate.cpp
     model.cpp
+    structured_read.cpp
     registration.cpp
     service.cpp
     session.cpp
     request_mapper.cpp
     output_parser.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/decision_schema.cpp
     inference/denoising_loop.cpp
     inference/placement.cpp
     inference/expert_execution.cpp

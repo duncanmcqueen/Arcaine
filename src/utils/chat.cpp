@@ -43,3 +43,24 @@ std::vector<std::string> TokenizerBridge::pieces(const std::vector<int>& token_i
                                         /*strip_leading_space=*/false));
     return out;
 }
+
+std::vector<int> TokenizerBridge::encode_raw(const std::string& text, bool add_bos,
+                                             bool add_prefix_space) {
+    return tokenizer_.encode(text, add_bos, add_prefix_space);
+}
+
+int TokenizerBridge::token_id(const std::string& token) const {
+    return tokenizer_.token_id(token);
+}
+
+bool TokenizerBridge::has_token(const std::string& token) const {
+    return tokenizer_.has_token(token);
+}
+
+int TokenizerBridge::vocab_size() const {
+    return tokenizer_.vocab_size();
+}
+
+bool TokenizerBridge::is_special_token(int id) const {
+    return tokenizer_.is_special_token(id);
+}

@@ -8,6 +8,7 @@
 // and it does not branch on whether the model is autoregressive or
 // block-diffusion.
 #include "apps/server/app_state.hpp"
+#include "apps/server/routes/systemone.hpp"
 #include "apps/server/server_app.hpp"
 
 #include "utils/chat_template_kwargs.hpp"
@@ -107,6 +108,7 @@ int main(int argc, char** argv) {
     setvbuf(stdout, nullptr, _IOLBF, 0);
     try {
         arcaine::server::ServerOptions opts = arcaine::server::parse_args(argc, argv);
+        arcaine::server::validate_systemone_config();
         arcaine::server::init_debug_log(opts);
         std::printf("[api] loading model from %s ...\n", opts.model_dir.c_str());
         arcaine::server::AppState app(std::move(opts));

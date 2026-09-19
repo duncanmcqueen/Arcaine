@@ -5,14 +5,18 @@
 #include "apps/server/openai/schemas.hpp"
 #include "apps/server/routes/chat_completions.hpp"
 #include "apps/server/routes/models.hpp"
+#include "apps/server/routes/systemone.hpp"
 
 #include <httplib/httplib.h>
 #include <nlohmann/json.hpp>
 
 #include <cstdio>
+#include <cstdlib>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 namespace arcaine::server {
 namespace {
@@ -37,6 +41,22 @@ bool authorized(const httplib::Request& req, const AppState& app) {
     if (app.api_key.empty()) return true;
     return req.get_header_value("Authorization") == "Bearer " + app.api_key;
 }
+
+// Find the web root. Use ARCAINE_WEB_DIR first.
+std::string resolve_web_root() {
+    namespace fs = std::filesystem;
+    std::vector<std::string> candidates;
+    if (const char* e = std::getenv("ARCAINE_WEB_DIR"); e && *e) candidates.push_back(e);
+    candidates.push_back((fs::current_path() / "third_party/web").string());
+    std::error_code ec;
+    if (fs::path exe = fs::read_symlink("/proc/self/exe", ec); !ec)
+        candidates.push_back((exe.parent_path() / "third_party/web").string());
+    for (const auto& c : candidates) {
+        std::error_code fec;
+        if (fs::is_regular_file(fs::path(c) / "index.html", fec)) return c;
+    }
+    return {};
+}
 }  // namespace
 
 void init_debug_log(const ServerOptions& opts) {
@@ -47,6 +67,21 @@ void init_debug_log(const ServerOptions& opts) {
 
 int run_server(AppState& app) {
     httplib::Server server;
+
+    // Serve the UI. API routes remain active.
+    if (std::string web_root = resolve_web_root(); !web_root.empty()) {
+        server.set_mount_point("/", web_root);
+        server.Get("/", [web_root](const httplib::Request&, httplib::Response& res) {
+            std::ifstream in(std::filesystem::path(web_root) / "index.html",
+                             std::ios::binary);
+            std::string body((std::istreambuf_iterator<char>(in)),
+                             std::istreambuf_iterator<char>());
+            res.set_content(body, "text/html; charset=utf-8");
+        });
+        log_line("info", "decision lab UI: " + web_root);
+    } else {
+        log_line("info", "decision lab UI: not found (set ARCAINE_WEB_DIR to serve it)");
+    }
 
     server.Get("/v1/models", [&](const httplib::Request& req, httplib::Response& res) {
         log_line("info", request_label(req) + " received");
@@ -75,6 +110,23 @@ int run_server(AppState& app) {
             return;
         }
         handle_chat_completions(req, res, app);
+    });
+
+    server.Post("/v1/systemone", [&](const httplib::Request& req, httplib::Response& res) {
+        log_line("info", request_label(req) + " received");
+        if (!authorized(req, app)) {
+            log_line("error", request_label(req) + " -> HTTP 401 invalid_api_key");
+            res.status = 401;
+            res.set_header("X-Arcaine-Confidence-Method", "normalized-entropy-v1");
+            res.set_header("X-Arcaine-Compatibility", "jev-format-approximate-confidence");
+            res.set_content(arcaine::openai::error_body("invalid or missing bearer token",
+                                                       "authentication_error",
+                                                       "invalid_api_key").dump(),
+                            "application/json");
+            return;
+        }
+        handle_systemone(req, res, app);
+        log_line("info", request_label(req) + " -> HTTP " + std::to_string(res.status));
     });
 
     server.set_error_handler([](const httplib::Request& req, httplib::Response& res) {
