@@ -196,8 +196,11 @@ PromptBuildResult build_chat_prompt(
     for (const ChatTemplateMessage& message : messages) {
         if (message.role.empty())
             throw std::runtime_error("chat message role cannot be empty");
-        json content = json::array({{{"type", "text"}, {"text", message.content}}});
-        rendered_messages.push_back({{"role", message.role}, {"content", content}});
+        // Pass plain text as a string. A single-element content-parts array
+        // takes the template's sequence branch, which appends a trailing space
+        // after the system content and diverges from the checkpoint renderer.
+        rendered_messages.push_back({{"role", message.role},
+                                     {"content", message.content}});
     }
 
     return render_chat_prompt(model_dir, std::move(rendered_messages), json::array(),

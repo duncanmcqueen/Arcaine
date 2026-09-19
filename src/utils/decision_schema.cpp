@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <set>
 #include <unordered_set>
 
@@ -34,12 +35,26 @@ uint64_t fnv1a64(const std::string& s, uint64_t h = 14695981039346656037ULL) {
     return fnv1a64(s.data(), s.size(), h);
 }
 
-// Hash one field with an explicit little-endian length prefix. The prefix makes
-// the byte stream unambiguous: a value that contains a separator cannot merge
-// with the next field. Without it, two different questions can hash equally.
+// Append a length-prefixed field to a canonical string. The decimal length and
+// ':' delimiter make the encoding unambiguous even when a value contains '\n',
+// '\x1f', or ':'.
+void append_canon_field(std::string& out, const std::string& s) {
+    out += std::to_string(s.size());
+    out += ':';
+    out += s;
+    out += '\n';
+}
+
+// Hash one field with an explicit little-endian 64-bit length prefix. The byte
+// order is written by hand, so the stream is identical on any host. The prefix
+// makes the byte stream unambiguous: a value that contains a separator cannot
+// merge with the next field. Without it, two different questions can hash
+// equally. The stream version is "arcaine-systemone-v1".
 uint64_t hash_field(uint64_t h, const std::string& s) {
     const uint64_t n = (uint64_t)s.size();
-    h = fnv1a64(&n, sizeof(n), h);
+    unsigned char le[8];
+    for (int i = 0; i < 8; ++i) le[i] = (unsigned char)((n >> (8 * i)) & 0xffu);
+    h = fnv1a64(le, sizeof(le), h);
     return fnv1a64(s.data(), s.size(), h);
 }
 
@@ -162,21 +177,38 @@ std::vector<std::string> pick_labels(TokenizerBridge& tok, const std::string& le
         "template — a blocking compatibility gap");
 }
 
+// Trailing tokens of `full` that are not part of `base`. `base` is the same
+// conversation rendered without the assistant generation prompt, so the result
+// is the assistant generation suffix alone. The scaffold is validated only in
+// this suffix, never in the state or instructions.
+std::vector<int32_t> generation_suffix(const std::vector<int>& full,
+                                       const std::vector<int>& base,
+                                       const std::string& what) {
+    size_t n = 0;
+    while (n < full.size() && n < base.size() && full[n] == base[n]) ++n;
+    if (n != base.size())
+        throw DecisionSchemaError(what + ": the chat template's generation prompt "
+            "is not a trailing suffix of the rendered conversation; cannot isolate "
+            "the assistant suffix");
+    return std::vector<int32_t>(full.begin() + (std::ptrdiff_t)n, full.end());
+}
+
 // Resolve how the served chat template handled the empty thought scaffold, and
 // return the tokens the canvas must add.
 //
-// Three cases are accepted or rejected explicitly:
-//   complete  - the prompt ends with the full scaffold; the canvas adds nothing.
-//   absent    - no scaffold token occurs anywhere; the canvas adds the full
-//               scaffold (the served template leaves it to the model).
-//   partial   - the prompt ends with an incomplete scaffold, or a scaffold
-//               appears outside the trailing position. The compiler rejects it
-//               instead of guessing a continuation or appending a duplicate.
+// Cases, decided from the assistant generation suffix only:
+//   complete    - suffix ends with the full scaffold; the canvas adds nothing.
+//   absent      - no scaffold token occurs in the suffix; the canvas adds the
+//                 full scaffold (the served template leaves it to the model).
+//   partial     - suffix ends with the full opening but no close; the missing
+//                 close tokens are appended, with no duplication.
+//   unsupported - suffix ends with a shorter partial, or a scaffold appears
+//                 outside the trailing position; the compiler rejects it.
 //
 // Only the scaffold token sequence is matched, not the single closing token, so
-// ordinary text that contains one channel token does not trip the check.
+// quoted channel markers in the state or instructions do not trip the check.
 std::vector<int32_t> detect_scaffold_prefix(TokenizerBridge& tok,
-                                            const std::vector<int>& prompt,
+                                            const std::vector<int32_t>& suffix,
                                             const std::string& what) {
     static const std::string kScaffold = "<|channel>thought\n<channel|>";
     static const std::string kOpen = "<|channel>thought\n";
@@ -190,30 +222,46 @@ std::vector<int32_t> detect_scaffold_prefix(TokenizerBridge& tok,
         throw DecisionSchemaError(what + ": thought scaffold does not tokenize as "
             "a stable prefix; cannot build the canvas");
 
-    // Complete scaffold: the prompt ends with the full token sequence.
-    if (prompt.size() >= full.size() &&
-        std::equal(full.begin(), full.end(), prompt.end() - full.size()))
-        return {};
+    auto contains = [](const std::vector<int32_t>& hay, const std::vector<int32_t>& needle,
+                       size_t begin, size_t end) {
+        return std::search(hay.begin() + (std::ptrdiff_t)begin,
+                           hay.begin() + (std::ptrdiff_t)end,
+                           needle.begin(), needle.end()) != hay.begin() + (std::ptrdiff_t)end;
+    };
 
-    // Partial scaffold: the prompt ends with a proper prefix of the sequence.
+    // Complete: the suffix ends with the full scaffold.
+    if (suffix.size() >= full.size() &&
+        std::equal(full.begin(), full.end(), suffix.end() - full.size())) {
+        const size_t head = suffix.size() - full.size();
+        if (contains(suffix, full, 0, head) || contains(suffix, open, 0, head))
+            throw DecisionSchemaError(what + ": chat template emitted a duplicated "
+                "thought scaffold; refusing to guess the canvas prefix");
+        return {};
+    }
+
+    // Partial: the suffix ends with a proper prefix of the scaffold.
     int k = 0;
     for (int j = (int)full.size() - 1; j >= 1; --j) {
-        if (prompt.size() >= (size_t)j &&
-            std::equal(full.begin(), full.begin() + j, prompt.end() - j)) { k = j; break; }
+        if (suffix.size() >= (size_t)j &&
+            std::equal(full.begin(), full.begin() + j, suffix.end() - j)) { k = j; break; }
+    }
+    if (k >= (int)open.size()) {
+        const size_t head = suffix.size() - (size_t)k;
+        if (contains(suffix, full, 0, head) || contains(suffix, open, 0, head))
+            throw DecisionSchemaError(what + ": chat template emitted a duplicated "
+                "thought scaffold; refusing to guess the canvas prefix");
+        return std::vector<int32_t>(full.begin() + k, full.end());   // append the close
     }
     if (k > 0)
-        throw DecisionSchemaError(what + ": chat template emitted a partial thought "
-            "scaffold; refusing to guess the canvas prefix");
+        throw DecisionSchemaError(what + ": chat template ended with an unsupported "
+            "partial thought scaffold");
 
-    // No trailing scaffold. Reject a scaffold elsewhere in the prompt instead of
-    // appending a second copy.
-    auto contains = [&](const std::vector<int32_t>& seq) {
-        return std::search(prompt.begin(), prompt.end(), seq.begin(), seq.end()) != prompt.end();
-    };
-    if (contains(full) || contains(open))
+    // Absent: no scaffold at the trailing position. Reject one elsewhere in the
+    // suffix, but do not scan the state or instructions.
+    if (contains(suffix, full, 0, suffix.size()) || contains(suffix, open, 0, suffix.size()))
         throw DecisionSchemaError(what + ": chat template emitted a partial or "
             "duplicated thought scaffold; refusing to guess the canvas prefix");
-    return full;   // absent: the template left it to us
+    return full;
 }
 
 std::string question_type_name(DecisionQuestionType t) {
@@ -435,11 +483,12 @@ DecisionRequest parse_decision_request(const ordered_json& body,
         // Derive noise from question content, not the external ID. Hash a
         // length-prefixed canonical stream so distinct content cannot collide by
         // concatenation. Variant: FNV-1a-64 over [u64 length][bytes] per field.
-        std::string canon = type;
-        canon += '\x1f'; canon += q.instructions;
+        std::string canon;
+        append_canon_field(canon, type);
+        append_canon_field(canon, q.instructions);
         for (size_t j = 0; j < q.option_keys.size(); ++j) {
-            canon += '\x1f'; canon += q.option_keys[j];
-            canon += '='; canon += canonical_dump(q.option_descriptions[j]);
+            append_canon_field(canon, q.option_keys[j]);
+            append_canon_field(canon, canonical_dump(q.option_descriptions[j]));
         }
         uint64_t h = fnv1a64("arcaine-systemone-v1");
         h = hash_field(h, std::to_string(settings.base_seed));
@@ -511,14 +560,18 @@ void compile_decision_questions(DecisionRequest& req, TokenizerBridge& tokenizer
             q.label_texts = pick_labels(tokenizer, lead, letter_labels(), n, what);
         }
 
-        // Build one prompt for this question.
-        q.prompt_ids = tokenizer.build_prompt(std::vector<ChatTemplateMessage>{
+        // Build one prompt for this question. Render it twice so the assistant
+        // generation suffix is isolated from the state and instructions.
+        const std::vector<ChatTemplateMessage> messages = {
             {"system", system_text(q)},
-            {"user", req.state_text}});
+            {"user", req.state_text}};
+        q.prompt_ids = tokenizer.build_prompt(messages);
         q.prompt_tokens = (int)q.prompt_ids.size();
         if (q.prompt_ids.empty())
             throw DecisionSchemaError(what + ": chat template produced an empty prompt");
-        std::vector<int32_t> prefix = detect_scaffold_prefix(tokenizer, q.prompt_ids, what);
+        const std::vector<int> no_gen = tokenizer.build_prompt_no_generation(messages);
+        std::vector<int32_t> gen_suffix = generation_suffix(q.prompt_ids, no_gen, what);
+        std::vector<int32_t> prefix = detect_scaffold_prefix(tokenizer, gen_suffix, what);
 
         // Verify labels with the prompt prefix and close token.
         SlotVerification slot = verify_slot(tokenizer, lead, q.label_texts, what,

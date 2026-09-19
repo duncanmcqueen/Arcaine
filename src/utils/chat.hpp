@@ -16,6 +16,10 @@ public:
 
     std::vector<int> build_prompt(const std::string& user_prompt);
     std::vector<int> build_prompt(const std::vector<ChatTemplateMessage>& messages);
+    // The same messages rendered with add_generation_prompt=false. The trailing
+    // tokens that differ from build_prompt() are the assistant generation
+    // suffix, isolated from the state and instructions content.
+    std::vector<int> build_prompt_no_generation(const std::vector<ChatTemplateMessage>& messages);
     std::vector<int> build_prompt_json(
         const nlohmann::ordered_json& messages,
         const nlohmann::ordered_json& tools,

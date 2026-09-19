@@ -13,28 +13,44 @@ predictions, calibrated probabilities, or equal performance.
 
 ## Validation status
 
-- **Source-complete:** request/response shape, question isolation (separate
-  prompt + canvas, sequential under the model lock), 255-option Choice, Score
-  2–10, Noul, read policy, graph-capture bypass, and error-path cleanup are
-  implemented and covered by the checks below.
-- **Executed on this checkout:** `scripts/test_systemone.py` (HTTP shapes,
-  validation, isolation, concurrency, lifecycle counts, graph-bypass
-  counters), the scoring micro-harness `slot_score_check.cpp` (conditional
-  probabilities, 255 labels, FP32 underflow, nonfinite logits),
-  `decision_validation_check.cpp` (direct model-API bounds/capacity rejection
-  before GPU submission), `scripts/check_tokenizer_parity.py` (rendered prompt
-  + slot-critical fixtures), `scripts/test_systemone_recovery.py` (fault
-  injection + error-path drain + graph-bypass counters), and
-  `scripts/check_sdk_compat.py` (official TypeSafe/Jev SDK parses live
-  responses, including structured Choice/Score content, arbitrary IDs, and all
-  255 options). See [systemone-results.md](systemone-results.md) for the result
-  table, environment, and incomplete gates.
-- **Not established:** exact Jev confidence parity (formula unpublished),
-  calibrated probabilities, equal predictions/throughput, and
-  quality/accuracy/Brier numbers. Local accuracy and Brier evaluation need
-  labeled cases only; the hosted service is not required for that. A hosted or
-  vLLM reference comparison is separate quality evidence and remains
-  unverified here.
+[systemone-results.md](systemone-results.md) is the requirement-to-evidence
+table with exact commands, environment, and results.
+
+**Implemented and executed on this checkout**
+
+- `scripts/test_systemone.py` — HTTP shapes, validation, isolation,
+  concurrency, lifecycle counts, graph-bypass counters.
+- `scripts/check_compiler_parity.py` + `decision_compile_export.cpp` — exact
+  prompt/canvas/slot/label-id agreement between Arcaine's compiler and an
+  independent checkpoint-tokenizer/template construction, over Choice
+  2/26/27/128/255, Score 2/10, Noul, Unicode, and structured descriptions.
+- `scripts/check_scaffold_cases.py` — complete/absent/partial completed and
+  short-partial/duplicated rejected, through the real compiler.
+- `decision_hash_check.cpp` — content-stream golden vectors and invariance.
+- `decision_validation_check.cpp` — direct-API bounds before GPU submission.
+- `slot_score_check.cpp` — conditional probabilities, 255 labels, FP32
+  underflow, nonfinite logits.
+- `scripts/test_systemone_recovery.py` — fault injection inside prefill and
+  decode, error-path drain, graph bypass.
+- `scripts/eval_systemone_behavior.py` — labeled Noul/Choice/Score behavior.
+
+**Implemented, not executed here (dependency or hardware gate)**
+
+- `scripts/check_sdk_compat.py` — official TypeSafe/Jev SDK request/response.
+  The `typesafe_sdk` package is not installed in this environment.
+- Width execution at 17/32/64 and the full fixed/auto read boundary matrix.
+  These need a direct-model harness; the compiled canvas width is fixed by the
+  compiler, not by an HTTP field.
+- `scripts/check_tokenizer_parity.py` — raw-encoding companion; superseded by
+  the compiler-parity check above.
+- Cross-engine comparison against the pinned vLLM PR. No equivalent
+  hardware/checkpoint is available here.
+
+**Not established**
+
+- Exact Jev confidence parity (formula unpublished), calibrated probabilities,
+  and equal predictions/throughput.
+- Cross-engine parity remains unverified.
 
 Guide-vs-schema difference: the Choice guide permits structured option
 descriptions and the narrower HTTP schema documents strings only — the
@@ -154,6 +170,10 @@ the response's `model` always reports the actual local model.
   most the model's configured canvas capacity (`canvas_capacity()`, the width
   the activation arena is planned for). The capacity is fixed at load time; the
   former unconditional 256 value is not guaranteed.
+- Allocation mode: structured reads require the pooled activation arena.
+  `DIFF_ARENA=off` / `DISABLE_SCRATCH=1` are rejected with a clear error before
+  GPU work, because that mode frees device memory immediately while submitted
+  kernels can still read it.
 
 ## Read policy (deployment settings, not Jev-derived)
 

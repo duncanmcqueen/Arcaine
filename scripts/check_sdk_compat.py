@@ -122,6 +122,38 @@ def main():
         probs = resp.choices["big"].probabilities
         check("SDK parses all 255 Choice probabilities", set(probs) == set(crit))
 
+    # 4. Official client request construction + structured-value preservation.
+    # This exercises the SDK's request serialization, not just response decoding.
+    import typesafe_sdk
+    from typesafe_sdk import TypeSafeClient, Noul, Choice, Score
+    print(f"official SDK version: {getattr(typesafe_sdk, '__version__', 'unknown')}")
+    client = TypeSafeClient(api_key=args.key, base_url=args.base)
+    structured_choice = {"support": {"team": "cs"}, "engineering": {"team": "eng"}}
+    structured_score = [{"level": "Minor", "rank": 0},
+                        {"level": "Serious", "rank": 1},
+                        {"level": "Critical", "rank": 2}]
+    try:
+        resp = client.system_one(
+            state={"ticket": "Everything is down and we have a demo at noon."},
+            questions={
+                "urgent": Noul(instructions="Does this need a response within an hour?",
+                               criteria={"true": "outage", "false": "can wait"}),
+                "route": Choice(instructions="Choose the team.", criteria=structured_choice),
+                "severity": Score(instructions="Rate the incident.", criteria=structured_score),
+            },
+            model=model)
+        check("official client: Noul parses without confidence",
+              "urgent" in resp.nouls and resp.nouls["urgent"].noul >= 0.0)
+        check("official client: structured Choice description survives",
+              resp.choices["route"].choice in structured_choice)
+        legend = resp.scores["severity"].legend
+        check("official client: structured Score legend value survives",
+              legend.get(1) == {"level": "Serious", "rank": 1}, json.dumps(legend))
+        check("official client: Score legend keys are integer indices",
+              set(legend) == {0, 1, 2}, json.dumps(list(legend)))
+    except Exception as e:  # noqa: BLE001
+        check("official client: constructed request accepted", False, repr(e))
+
     print()
     if FAILURES:
         print(f"{len(FAILURES)} SDK compatibility FAILURES:", *FAILURES, sep="\n  - ")
