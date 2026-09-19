@@ -186,11 +186,14 @@ void handle_systemone(const httplib::Request& req, httplib::Response& res,
         json answers = json::object();
         json diagnostics = json::object();
         long long input_tokens = 0, output_tokens = 0;
-        Nvfp4GraphCounts graph_before = dreq.want_diagnostics
-            ? nvfp4_graph_capture_counts() : Nvfp4GraphCounts{};
+        Nvfp4GraphCounts graph_before{}, graph_after{};
         {
             // Run questions in order under the model lock.
             std::lock_guard<std::mutex> lock(app.generate_mu);
+            // Read both graph counters inside the lock. A concurrent chat call
+            // would otherwise add captures or replays between the two reads, and
+            // the delta would not describe this structured request.
+            if (dreq.want_diagnostics) graph_before = nvfp4_graph_capture_counts();
             for (auto& q : dreq.questions) {
                 DecisionReadResult r = service->model().read_decisions(
                     q.prompt_ids, q.templ, read_options(q.stream_seed));
@@ -204,6 +207,7 @@ void handle_systemone(const httplib::Request& req, httplib::Response& res,
                     answers[q.external_id] = dg::map_decision_answer(q, r, nullptr);
                 }
             }
+            if (dreq.want_diagnostics) graph_after = nvfp4_graph_capture_counts();
         }
 
         json out;
@@ -212,7 +216,6 @@ void handle_systemone(const httplib::Request& req, httplib::Response& res,
         out["usage"] = {{"input_tokens", input_tokens},
                         {"output_tokens", output_tokens}};
         if (dreq.want_diagnostics) {
-            Nvfp4GraphCounts graph_after = nvfp4_graph_capture_counts();
             json ext;
             ext["diagnostics"] = std::move(diagnostics);
             ext["backend"] = "arcaine diffusion_gemma (approximate Jev format; "

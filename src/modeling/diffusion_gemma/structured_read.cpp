@@ -69,13 +69,15 @@ DecisionReadResult DiffusionGemmaModel::read_decisions(
     const DecisionReadOptions& options)
 {
     const int V = cfg_.text.vocab_size;
+
+    // Validate before any GPU submission. Size checks run on the original
+    // size_t values, so an oversized vector cannot narrow to a small count.
+    validate_decision_read_request(V, kv_cache_max_seq(), canvas_capacity(),
+                                   prompt_ids, compiled, options);
+
     const int C = (int)compiled.canvas.size();
     const int K = (int)compiled.label_ids.size();
     const int L = cfg_.text.num_hidden_layers;
-
-    // Validate before any GPU submission.
-    validate_decision_read_request(V, kv_cache_max_seq(), canvas_capacity(),
-                                   prompt_ids, compiled, options);
 
     const int max_reads = options.auto_mode ? options.auto_max : options.reads;
 
@@ -115,10 +117,10 @@ DecisionReadResult DiffusionGemmaModel::read_decisions(
         labels_dev.upload(compiled.label_ids.data(), K);
     }
 
-    // Use this test hook to check error cleanup.
-    static const bool fault_after_first_decode = [] {
+    // Error-cleanup test hooks. ARCAINE_SYSTEMONE_FAULT selects one point.
+    static const std::string fault_mode = [] {
         const char* e = std::getenv("ARCAINE_SYSTEMONE_FAULT");
-        return e && std::string(e) == "after_first_decode_submit";
+        return e ? std::string(e) : std::string();
     }();
     static std::atomic<bool> fault_fired{false};
 
@@ -130,6 +132,10 @@ DecisionReadResult DiffusionGemmaModel::read_decisions(
         }
         result.prefill_calls = 1;
         watchdog.beat("prefill done");
+
+        if (fault_mode == "after_prefill" && !fault_fired.exchange(true))
+            throw std::runtime_error(
+                "read_decisions: injected fault after prefill (test hook)");
 
         for (int r = 0; r < max_reads; ++r) {
             auto td0 = Clk::now();
@@ -161,7 +167,8 @@ DecisionReadResult DiffusionGemmaModel::read_decisions(
                            /*rng_seed=*/0, /*rng_block=*/0, /*rng_step=*/0,
                            &target);
 
-            if (fault_after_first_decode && r == 0 && !fault_fired.exchange(true))
+            if (fault_mode == "after_first_decode_submit" && r == 0 &&
+                !fault_fired.exchange(true))
                 throw std::runtime_error(
                     "read_decisions: injected fault after decode submission (test hook)");
 

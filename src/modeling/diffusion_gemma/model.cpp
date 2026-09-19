@@ -31,6 +31,16 @@ static bool persist_xfer_stage_enabled() {
     return enabled;
 }
 
+// ARCAINE_SYSTEMONE_FAULT names a structured-read fault-injection point. The
+// recovery tests use it to throw while intermediate buffers are still live.
+static bool structured_fault(const char* stage) {
+    static const std::string mode = [] {
+        const char* e = std::getenv("ARCAINE_SYSTEMONE_FAULT");
+        return e ? std::string(e) : std::string();
+    }();
+    return mode == stage;
+}
+
 // Cross-GPU copy via host staging (devices have no P2P here).
 static void transfer(sycl::queue& src_q, const bf16* src,
                      sycl::queue& dst_q, bf16* dst, size_t n) {
@@ -277,6 +287,11 @@ void DiffusionGemmaModel::decode_forward(
         if (score_target) {
             diff_layer_forward(ctx0, w_.layers[l], hidden.data(), enc_kv_.layer(l),
                                seq, enc_len, cfg_.text, /*is_encoder=*/false);
+            // Fault-injection point inside decode: fail after the first layer
+            // while hidden and the layer intermediates are still live.
+            if (l == 0 && structured_fault("in_decode_layer"))
+                throw std::runtime_error(
+                    "read_decisions: injected fault inside decode (test hook)");
             continue;
         }
         Nvfp4GraphSession session;

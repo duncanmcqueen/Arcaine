@@ -63,6 +63,25 @@ void apply_experts_spec(const std::string& v, ServerOptions& opts) {
     }
 }
 
+// Parse an unsigned 32-bit integer. Reject a sign, trailing characters, and
+// values above the destination range instead of letting std::stoul narrow them.
+unsigned parse_u32(const std::string& s, const char* what) {
+    if (s.empty() || s[0] == '-' || s[0] == '+')
+        throw std::runtime_error(std::string(what) + " must be a non-negative integer");
+    size_t pos = 0;
+    unsigned long long v = 0;
+    try {
+        v = std::stoull(s, &pos, 10);
+    } catch (const std::exception&) {
+        throw std::runtime_error(std::string(what) + " must be a non-negative integer");
+    }
+    if (pos != s.size())
+        throw std::runtime_error(std::string(what) + " has trailing characters: '" + s + "'");
+    if (v > 0xffffffffULL)
+        throw std::runtime_error(std::string(what) + " is outside 0..4294967295");
+    return (unsigned)v;
+}
+
 ServerOptions parse_args(int argc, char** argv) {
     ServerOptions opts;
     for (int i = 1; i < argc; ++i) {
@@ -79,7 +98,7 @@ ServerOptions parse_args(int argc, char** argv) {
         else if (a == "--max-seq")            opts.max_seq = std::stoi(next());
         else if (a == "--max-tokens")         opts.default_max_tokens = std::stoi(next());
         else if (a == "--steps")              opts.steps = std::stoi(next());
-        else if (a == "--seed")               opts.seed = (unsigned)std::stoul(next());
+        else if (a == "--seed")               opts.seed = parse_u32(next(), "--seed");
         else if (a == "--layers")             apply_layers_spec(next(), opts);
         else if (a == "--experts")            apply_experts_spec(next(), opts);
         else if (a == "--gpus") {

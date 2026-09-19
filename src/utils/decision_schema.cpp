@@ -24,9 +24,23 @@ std::string content_text(const ordered_json& v) {
     return canonical_dump(v);
 }
 
-uint64_t fnv1a64(const std::string& s, uint64_t h = 1469598103934665603ULL) {
-    for (unsigned char c : s) { h ^= c; h *= 1099511628211ULL; }
+// FNV-1a-64. The offset basis is the standard 0xcbf29ce484222325.
+uint64_t fnv1a64(const void* data, size_t n, uint64_t h) {
+    const unsigned char* p = (const unsigned char*)data;
+    for (size_t i = 0; i < n; ++i) { h ^= p[i]; h *= 1099511628211ULL; }
     return h;
+}
+uint64_t fnv1a64(const std::string& s, uint64_t h = 14695981039346656037ULL) {
+    return fnv1a64(s.data(), s.size(), h);
+}
+
+// Hash one field with an explicit little-endian length prefix. The prefix makes
+// the byte stream unambiguous: a value that contains a separator cannot merge
+// with the next field. Without it, two different questions can hash equally.
+uint64_t hash_field(uint64_t h, const std::string& s) {
+    const uint64_t n = (uint64_t)s.size();
+    h = fnv1a64(&n, sizeof(n), h);
+    return fnv1a64(s.data(), s.size(), h);
 }
 
 // Verify answer labels in the canvas context.
@@ -148,22 +162,58 @@ std::vector<std::string> pick_labels(TokenizerBridge& tok, const std::string& le
         "template — a blocking compatibility gap");
 }
 
-// Find the canvas prefix from the rendered prompt.
+// Resolve how the served chat template handled the empty thought scaffold, and
+// return the tokens the canvas must add.
+//
+// Three cases are accepted or rejected explicitly:
+//   complete  - the prompt ends with the full scaffold; the canvas adds nothing.
+//   absent    - no scaffold token occurs anywhere; the canvas adds the full
+//               scaffold (the served template leaves it to the model).
+//   partial   - the prompt ends with an incomplete scaffold, or a scaffold
+//               appears outside the trailing position. The compiler rejects it
+//               instead of guessing a continuation or appending a duplicate.
+//
+// Only the scaffold token sequence is matched, not the single closing token, so
+// ordinary text that contains one channel token does not trip the check.
 std::vector<int32_t> detect_scaffold_prefix(TokenizerBridge& tok,
                                             const std::vector<int>& prompt,
                                             const std::string& what) {
     static const std::string kScaffold = "<|channel>thought\n<channel|>";
-    const std::string close = "<channel|>";
-    if (!tok.has_token(close) || !tok.has_token("<|channel>"))
+    static const std::string kOpen = "<|channel>thought\n";
+    if (!tok.has_token("<channel|>") || !tok.has_token("<|channel>"))
         throw DecisionSchemaError(what + ": tokenizer has no thought-channel "
             "tokens; cannot verify the served chat template's suffix");
-    const int close_id = tok.token_id(close);
-    if (!prompt.empty() && prompt.back() == close_id) return {};   // template emitted it
-    for (int id : prompt)
-        if (id == close_id)
-            throw DecisionSchemaError(what + ": chat template emitted a partial or "
-                "duplicated thought scaffold; refusing to guess the canvas prefix");
-    return tok.encode_raw(kScaffold, /*add_bos=*/false);           // template left it to us
+    const std::vector<int32_t> full = tok.encode_raw(kScaffold, /*add_bos=*/false);
+    const std::vector<int32_t> open = tok.encode_raw(kOpen, /*add_bos=*/false);
+    if (full.empty() || open.empty() || open.size() >= full.size() ||
+        !std::equal(open.begin(), open.end(), full.begin()))
+        throw DecisionSchemaError(what + ": thought scaffold does not tokenize as "
+            "a stable prefix; cannot build the canvas");
+
+    // Complete scaffold: the prompt ends with the full token sequence.
+    if (prompt.size() >= full.size() &&
+        std::equal(full.begin(), full.end(), prompt.end() - full.size()))
+        return {};
+
+    // Partial scaffold: the prompt ends with a proper prefix of the sequence.
+    int k = 0;
+    for (int j = (int)full.size() - 1; j >= 1; --j) {
+        if (prompt.size() >= (size_t)j &&
+            std::equal(full.begin(), full.begin() + j, prompt.end() - j)) { k = j; break; }
+    }
+    if (k > 0)
+        throw DecisionSchemaError(what + ": chat template emitted a partial thought "
+            "scaffold; refusing to guess the canvas prefix");
+
+    // No trailing scaffold. Reject a scaffold elsewhere in the prompt instead of
+    // appending a second copy.
+    auto contains = [&](const std::vector<int32_t>& seq) {
+        return std::search(prompt.begin(), prompt.end(), seq.begin(), seq.end()) != prompt.end();
+    };
+    if (contains(full) || contains(open))
+        throw DecisionSchemaError(what + ": chat template emitted a partial or "
+            "duplicated thought scaffold; refusing to guess the canvas prefix");
+    return full;   // absent: the template left it to us
 }
 
 std::string question_type_name(DecisionQuestionType t) {
@@ -382,24 +432,37 @@ DecisionRequest parse_decision_request(const ordered_json& body,
                 "' (expected noul, choice, or score)");
         }
 
-        // Derive noise from question content, not the external ID.
+        // Derive noise from question content, not the external ID. Hash a
+        // length-prefixed canonical stream so distinct content cannot collide by
+        // concatenation. Variant: FNV-1a-64 over [u64 length][bytes] per field.
+        std::string canon = type;
+        canon += '\x1f'; canon += q.instructions;
+        for (size_t j = 0; j < q.option_keys.size(); ++j) {
+            canon += '\x1f'; canon += q.option_keys[j];
+            canon += '='; canon += canonical_dump(q.option_descriptions[j]);
+        }
         uint64_t h = fnv1a64("arcaine-systemone-v1");
-        h = fnv1a64(std::to_string(settings.base_seed), h);
-        h = fnv1a64("\n" + type, h);
-        h = fnv1a64("\n" + req.state_text, h);
-        h = fnv1a64("\n" + q.instructions, h);
-        for (size_t j = 0; j < q.option_keys.size(); ++j)
-            h = fnv1a64("\n" + q.option_keys[j] + "=" +
-                        canonical_dump(q.option_descriptions[j]), h);
+        h = hash_field(h, std::to_string(settings.base_seed));
+        h = hash_field(h, type);
+        h = hash_field(h, req.state_text);
+        h = hash_field(h, q.instructions);
+        for (size_t j = 0; j < q.option_keys.size(); ++j) {
+            h = hash_field(h, q.option_keys[j]);
+            h = hash_field(h, canonical_dump(q.option_descriptions[j]));
+        }
         q.stream_seed = h;
+        q.canonical_content = std::move(canon);
 
         req.questions.push_back(std::move(q));
     }
 
-    // Run questions in stable content order.
+    // Run questions in stable content order. The canonical content breaks any
+    // stream-seed collision, so caller order cannot change execution order.
     std::stable_sort(req.questions.begin(), req.questions.end(),
                      [](const DecisionQuestion& a, const DecisionQuestion& b) {
-                         return a.stream_seed < b.stream_seed;
+                         if (a.stream_seed != b.stream_seed)
+                             return a.stream_seed < b.stream_seed;
+                         return a.canonical_content < b.canonical_content;
                      });
     return req;
 }

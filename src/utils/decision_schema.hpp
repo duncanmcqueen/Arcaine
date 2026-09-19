@@ -44,6 +44,9 @@ struct DecisionQuestion {
     std::vector<int>         prompt_ids;
     CompiledDecisionTemplate templ;
     uint64_t                 stream_seed = 0;
+    // Unambiguous canonical form of this question's content. Breaks stream-seed
+    // collisions so execution order is determined by content, not by caller order.
+    std::string              canonical_content;
     int                      prompt_tokens = 0;
 };
 

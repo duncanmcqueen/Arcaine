@@ -30,8 +30,10 @@ predictions, calibrated probabilities, or equal performance.
   255 options). See the final report for exact results on the named checkpoint.
 - **Not established:** exact Jev confidence parity (formula unpublished),
   calibrated probabilities, equal predictions/throughput, and
-  quality/accuracy/Brier numbers. These require the hosted service, labeled
-  evaluation cases, and separate measurement.
+  quality/accuracy/Brier numbers. Local accuracy and Brier evaluation need
+  labeled cases only; the hosted service is not required for that. A hosted or
+  vLLM reference comparison is separate quality evidence and remains
+  unverified here.
 
 Guide-vs-schema difference: the Choice guide permits structured option
 descriptions and the narrower HTTP schema documents strings only — the
@@ -82,7 +84,7 @@ the SDK ignores.
     "route":    {"type": "choice", "choice": "engineering",
                  "probabilities": {"engineering": 0.8, "support": 0.2},
                  "confidence": 0.2781},
-    "severity": {"type": "score", "score": 1.4,
+    "severity": {"type": "score", "score": 1.2,
                  "legend": {"0": "Minor", "1": "Serious", "2": "Critical"},
                  "probabilities": {"0": 0.1, "1": 0.6, "2": 0.3},
                  "confidence": 0.1827}
@@ -145,8 +147,12 @@ the response's `model` always reports the actual local model.
 - Choice options: 2–255 (single-token label codebook, verified per request
   against the loaded tokenizer).
 - Score levels: 2–10.
-- Prompt tokens per question: `--max-seq` (default 2048).
-- Canvas width: rounded up to a multiple of 16, at most 256 tokens.
+- Context per question: the compiled prompt **plus** canvas must fit `--max-seq`
+  (default 2048). A question is rejected when the two together exceed the limit.
+- Canvas width: the compiled answer template rounded up to a multiple of 16, at
+  most the model's configured canvas capacity (`canvas_capacity()`, the width
+  the activation arena is planned for). The capacity is fixed at load time; the
+  former unconditional 256 value is not guaranteed.
 
 ## Read policy (deployment settings, not Jev-derived)
 
