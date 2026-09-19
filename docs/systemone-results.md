@@ -121,24 +121,29 @@ Reads=1:
 
 | Target | Measured tokens | canvas | reads | p50 ms | p95 ms | prefill ms | decode ms | reads/s | dec/s |
 |---|---|---|---|---|---|---|---|---|---|
-| 512 | 518–526 | 16 | 15 | 8781.8 | 8950.6 | 472.6 | 93.0 | 0.3 | 0.3 |
-| 1024 | 1011–1019 | 16 | 15 | 10997.7 | 11194.5 | 686.8 | 94.2 | 0.3 | 0.3 |
-| 2048 | 2031–2039 | 16 | 15 | 20002.0 | 20364.7 | 1238.9 | 93.4 | 0.1 | 0.1 |
-| 4096 | 4071–4079 | 16 | 15 | 57106.3 | 57194.2 | 2358.4 | 93.7 | 0.1 | 0.1 |
+| 512 | 518–526 | 16 | 15 | 2153.5 | 2163.6 | 462.5 | 93.0 | 1.4 | 1.4 |
+| 1024 | 1011–1019 | 16 | 15 | 3289.7 | 3311.9 | 675.2 | 93.8 | 0.9 | 0.9 |
+| 2048 | 2031–2039 | 16 | 15 | 7676.2 | 7769.7 | 1232.5 | 93.4 | 0.4 | 0.4 |
+| 4096 | 4071–4079 | 16 | 15 | 24798.3 | 24881.0 | 2355.8 | 94.1 | 0.1 | 0.1 |
 
 Reads=4:
 
 | Target | Measured tokens | canvas | reads | p50 ms | p95 ms | prefill ms | decode ms | reads/s | dec/s |
 |---|---|---|---|---|---|---|---|---|---|
-| 512 | 518–526 | 16 | 60 | 8850.6 | 9087.1 | 462.5 | 363.3 | 1.4 | 0.3 |
-| 1024 | 1011–1019 | 16 | 60 | 11290.2 | 11424.2 | 680.5 | 368.3 | 1.1 | 0.3 |
-| 2048 | 2031–2039 | 16 | 60 | 20292.1 | 20766.8 | 1237.1 | 365.6 | 0.6 | 0.1 |
-| 4096 | 4071–4079 | 16 | 60 | 57027.5 | 57886.6 | 2357.7 | 367.9 | 0.2 | 0.1 |
+| 512 | 518–526 | 16 | 60 | 2462.2 | 2493.3 | 468.9 | 363.4 | 4.9 | 1.2 |
+| 1024 | 1011–1019 | 16 | 60 | 3684.3 | 3716.3 | 672.7 | 369.7 | 3.3 | 0.8 |
+| 2048 | 2031–2039 | 16 | 60 | 8588.8 | 8603.7 | 1231.7 | 365.8 | 1.4 | 0.3 |
+| 4096 | 4071–4079 | 16 | 60 | 27448.5 | 27652.4 | 2358.8 | 367.3 | 0.4 | 0.1 |
 
 `reads/s` counts scored slots; `dec/s` counts completed question answers. At
-4096 tokens p50 is dominated by work not in the synchronized prefill/decode
-split (prompt compilation/tokenization of three long questions on the host),
-not by the decoder. Four reads add only the decode time (~270 ms at 512).
+4096 tokens p50 is dominated by host prompt compilation/tokenization of three
+long questions, not by the decoder. Four reads add only the decode time
+(~270 ms at 512).
+
+These numbers are measured after the single-tokenization compiler fix. Before
+that fix the scaffold-suffix check tokenized every prompt twice, and the same
+harness gave 4096 p50 57106 ms (reads=1), 512 p50 8781.8 ms. The native
+tokenizer is the slow part; minja rendering is ~0.2 s per render.
 
 ### Official SDK (`check_sdk_compat.py`, typesafe_sdk 0.7.0)
 
