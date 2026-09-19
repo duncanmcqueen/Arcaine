@@ -64,6 +64,9 @@ struct DecisionReadOptions {
     float    auto_entropy_threshold = 0.5f;  // normalized label entropy in [0,1]
     float    auto_min_label_mass = 0.0f;     // full-vocab label mass floor in [0,1]
     uint64_t stream_seed = 0;           // per-question noise stream (content-derived)
+    // GPU-work watchdog timeout in seconds (0 = off). When a read makes no GPU
+    // progress for this long, the process exits to release the model lock.
+    float    watchdog_s = 0.0f;
 };
 
 // One independent read of one answer slot.  logprobs are full-vocabulary

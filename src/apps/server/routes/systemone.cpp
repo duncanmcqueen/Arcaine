@@ -87,6 +87,7 @@ struct SystemoneConfig {
     int   auto_max = 4;
     float auto_threshold = 0.5f;
     float auto_min_label_mass = 0.0f;
+    float watchdog_s = 0.0f;   // 0 = off
 };
 
 SystemoneConfig load_systemone_config() {
@@ -96,6 +97,7 @@ SystemoneConfig load_systemone_config() {
     c.auto_max    = parse_int_env("ARCAINE_SYSTEMONE_READS_AUTO_MAX", 4, 1, 32);
     c.auto_threshold = parse_float_env("ARCAINE_SYSTEMONE_AUTO_ENTROPY_THRESHOLD", 0.5f, 0.0f, 1.0f);
     c.auto_min_label_mass = parse_float_env("ARCAINE_SYSTEMONE_AUTO_MIN_LABEL_MASS", 0.0f, 0.0f, 1.0f);
+    c.watchdog_s = parse_float_env("ARCAINE_GPU_WATCHDOG_S", 0.0f, 0.0f, 3600.0f);
     return c;
 }
 
@@ -112,6 +114,7 @@ DecisionReadOptions read_options(uint64_t stream_seed) {
     o.auto_max = c.auto_max;
     o.auto_entropy_threshold = c.auto_threshold;
     o.auto_min_label_mass = c.auto_min_label_mass;
+    o.watchdog_s = c.watchdog_s;
     o.stream_seed = stream_seed;
     return o;
 }

@@ -62,4 +62,6 @@ inline void validate_decision_read_request(int vocab_size, int kv_cache_max_seq,
             "auto entropy threshold outside [0,1]");
     require(options.auto_min_label_mass >= 0.0f && options.auto_min_label_mass <= 1.0f,
             "auto minimum label mass outside [0,1]");
+    require(options.watchdog_s >= 0.0f && options.watchdog_s <= 3600.0f,
+            "GPU watchdog timeout outside [0,3600] seconds");
 }

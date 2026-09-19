@@ -122,6 +122,18 @@ int main() {
         DecisionReadOptions o; o.auto_min_label_mass = -0.1f;
         expect_throw("reject: negative label mass", std::vector<int>{1}, tmpl(16, 2), o);
     }
+    {
+        DecisionReadOptions o; o.watchdog_s = 30.0f;
+        expect_ok("valid: watchdog timeout 30s", std::vector<int>{1}, tmpl(16, 2), o);
+    }
+    {
+        DecisionReadOptions o; o.watchdog_s = -1.0f;
+        expect_throw("reject: negative watchdog timeout", std::vector<int>{1}, tmpl(16, 2), o);
+    }
+    {
+        DecisionReadOptions o; o.watchdog_s = 3601.0f;
+        expect_throw("reject: watchdog timeout > 3600", std::vector<int>{1}, tmpl(16, 2), o);
+    }
 
     std::printf(failures ? "\n%d FAILURES\n" : "\nall validation checks passed\n",
                 failures);

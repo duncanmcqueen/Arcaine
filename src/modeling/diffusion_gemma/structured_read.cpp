@@ -3,6 +3,7 @@
 #include "decision_validation.hpp"
 #include "fusions/logits.hpp"
 #include "../../runtime/gpu/engine.hpp"
+#include "../../runtime/gpu/gpu_watchdog.hpp"
 #include "../../runtime/quantization/nvfp4.hpp"
 #include <algorithm>
 #include <atomic>
@@ -84,6 +85,11 @@ DecisionReadResult DiffusionGemmaModel::read_decisions(
     // Disable graph capture for this read.
     Nvfp4EagerScope eager_scope;
 
+    // Bound the time this read may hold the model lock. If the GPU stops
+    // making progress, the watchdog exits the process with a clear message.
+    GpuWatchdog watchdog("systemone-read", options.watchdog_s);
+    watchdog.beat("validation");
+
     enc_kv_.reset();
     KvResetGuard kv_guard{enc_kv_};
 
@@ -118,10 +124,12 @@ DecisionReadResult DiffusionGemmaModel::read_decisions(
 
     try {
         {   auto t0 = Clk::now();
+            watchdog.beat("prefill");
             encode(prompt_ids, 0);
             result.prefill_s = secs(t0, Clk::now());
         }
         result.prefill_calls = 1;
+        watchdog.beat("prefill done");
 
         for (int r = 0; r < max_reads; ++r) {
             auto td0 = Clk::now();
@@ -143,6 +151,7 @@ DecisionReadResult DiffusionGemmaModel::read_decisions(
             target.nonfinite      = nonfinite_dev.data();
 
             GpuBuffer<bf16> soft_next;   // unused in structured mode
+            watchdog.beat("decode");
             decode_forward(canvas_dev.data(), /*soft_or_null=*/nullptr,
                            /*enc_len=*/result.prompt_tokens, /*seq=*/C,
                            /*temp=*/1.0f, /*u_dev=*/nullptr,
@@ -157,6 +166,7 @@ DecisionReadResult DiffusionGemmaModel::read_decisions(
                     "read_decisions: injected fault after decode submission (test hook)");
 
             // Download only the compact result.
+            watchdog.beat("download");
             DecisionSlotSample sample;
             sample.label_logprobs.resize(K);
             label_logp_dev.download(sample.label_logprobs.data(), K);
@@ -170,6 +180,7 @@ DecisionReadResult DiffusionGemmaModel::read_decisions(
             sample.argmax_logprob = scalars[1];
             result.decode_s += secs(td0, Clk::now());
             result.decode_calls += 1;
+            watchdog.beat("read done");
 
             // Reject nonfinite scores.
             require(nonfinite == 0,
